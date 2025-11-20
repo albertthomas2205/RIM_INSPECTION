@@ -104,6 +104,164 @@ def create_schedule(request):
     )
 
 
+@api_view(["POST"])
+def create_schedule_immediately(request):
+    location = request.data.get("location")
+
+    # ---- REQUIRED FIELD VALIDATION ----
+    if not location:
+        return Response(
+            {
+                "status": 400,
+                "message": "Missing required field: location",
+                "success": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # ---- CURRENT IST TIME ----
+    now = timezone.localtime()  # IST time
+    rounded_now = now.replace(second=0, microsecond=0)
+
+    scheduled_date = rounded_now.date()
+    scheduled_time = rounded_now.time()
+
+    # ---- END TIME = +1 hour (rounded) ----
+    new_end_dt = rounded_now + timedelta(hours=1)
+    end_time = new_end_dt.replace(second=0, microsecond=0).time()
+
+    # ---- OVERLAP CHECK ----
+    overlapping = Schedule.objects.filter(
+        location=location,
+        scheduled_date=scheduled_date,
+        scheduled_time__lt=end_time,
+        end_time__gt=scheduled_time
+    ).exists()
+
+    if overlapping:
+        return Response(
+            {
+                "status": 400,
+                "message": "A schedule already exists for this time slot.",
+                "success": False
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # ---- SAVE SCHEDULE ----
+    schedule = Schedule.objects.create(
+        location=location,
+        scheduled_date=scheduled_date,
+        scheduled_time=scheduled_time,
+        end_time=end_time,
+        status="processing"  # start immediately
+    )
+
+    # ---- CELERY TASKS ----
+    start_datetime = rounded_now  # run now
+    end_datetime = new_end_dt     # finish after 1 hour (IST)
+
+    set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
+    set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
+
+    # ---- RESPONSE ----
+    return Response(
+        {
+            "status": 201,
+            "message": "Schedule created and started immediately",
+            "success": True,
+            "data": {
+                "id": schedule.id,
+                "location": schedule.location,
+                "scheduled_date": str(schedule.scheduled_date),
+                "scheduled_time": str(schedule.scheduled_time),
+                "end_time": str(schedule.end_time),
+                "status": schedule.status
+            }
+        },
+        status=status.HTTP_201_CREATED
+    )
+
+
+@api_view(["PUT"])
+def update_schedule(request, schedule_id):
+
+    # 1️⃣ GET SCHEDULE
+    try:
+        schedule = Schedule.objects.get(id=schedule_id, is_canceled=False)
+    except Schedule.DoesNotExist:
+        return Response(
+            {"status": 404, "message": "Schedule not found", "success": False},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Optional: allow location update
+    location = request.data.get("location", schedule.location)
+
+    # 2️⃣ GET CURRENT IST TIME (Django already returns IST if TIME_ZONE is set)
+    now = timezone.localtime()  # ensures IST even if system/DB is UTC
+    rounded_now = now.replace(second=0, microsecond=0)
+    new_scheduled_date = rounded_now.date()
+    new_scheduled_time = rounded_now.time()
+
+    # 3️⃣ END TIME = +1 hour
+    new_end_dt = now + timedelta(hours=1)
+    new_end_time = new_end_dt.time()
+
+    # 4️⃣ OVERLAP CHECK
+    overlapping = Schedule.objects.filter(
+        location=location,
+        scheduled_date=new_scheduled_date,
+        scheduled_time__lt=new_end_time,
+        end_time__gt=new_scheduled_time
+    ).exclude(id=schedule_id).exists()
+
+    if overlapping:
+        return Response(
+            {
+                "status": 400,
+                "message": "Time slot already booked at this location",
+                "success": False
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # 5️⃣ UPDATE THE SCHEDULE
+    schedule.location = location
+    schedule.scheduled_date = new_scheduled_date
+    schedule.scheduled_time = new_scheduled_time
+    schedule.end_time = new_end_time
+    schedule.status = "processing"  # start immediately
+    schedule.save()
+
+    # 6️⃣ CELERY TASKS (Correct IST scheduling)
+    start_datetime = timezone.localtime()          # IST now
+    end_datetime = new_end_dt                      # IST + 1 hour
+
+    set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
+    set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
+
+    # 7️⃣ RESPONSE
+    return Response(
+        {
+            "status": 200,
+            "message": "Schedule updated with current IST date/time and started",
+            "success": True,
+            "data": {
+                "id": schedule.id,
+                "location": schedule.location,
+                "scheduled_date": str(schedule.scheduled_date),
+                "scheduled_time": str(schedule.scheduled_time),
+                "end_time": str(schedule.end_time),
+                "status": schedule.status,
+            }
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+
+
 # -----------------------------------
 # DELETE SCHEDULE
 # -----------------------------------
