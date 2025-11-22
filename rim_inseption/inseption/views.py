@@ -11,6 +11,7 @@ from .serializers import ScheduleSerializer, InspectionSerializer
 from .tasks import set_status_processing, set_status_completed
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+from rest_framework.generics import ListCreateAPIView
 
 
 @swagger_auto_schema(
@@ -18,6 +19,7 @@ from drf_yasg import openapi
     request_body=ScheduleSerializer,
     responses={201: "Schedule created"}
 )
+
 
 @api_view(["POST"])
 def create_schedule(request):
@@ -44,7 +46,7 @@ def create_schedule(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # ---- TIME PARSING FIX ----
+    # ---- TIME PARSING ----
     def parse_time(t):
         try:
             return datetime.strptime(t, "%H:%M").time()
@@ -54,12 +56,12 @@ def create_schedule(request):
     scheduled_time = parse_time(time)
     scheduled_date = datetime.strptime(date, "%Y-%m-%d").date()
 
-    # Compute END TIME
+    # ---- COMPUTE 3-MINUTE END TIME ----
     new_start_dt = datetime.combine(scheduled_date, scheduled_time)
-    new_end_dt = new_start_dt + timedelta(hours=1)
+    new_end_dt = new_start_dt + timedelta(minutes=3)
     new_end_time = new_end_dt.time()
 
-    # Overlap check
+    # ---- OVERLAP CHECK ----
     overlapping = Schedule.objects.filter(
         location=location,
         scheduled_date=scheduled_date,
@@ -77,12 +79,15 @@ def create_schedule(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Save schedule
-    serializer = ScheduleSerializer(data=request.data)
+    # ---- SAVE SCHEDULE with UPDATED 3-MIN END TIME ----
+    data = request.data.copy()
+    data["end_time"] = new_end_time  # <<<<<< CRITICAL FIX
+
+    serializer = ScheduleSerializer(data=data)
     serializer.is_valid(raise_exception=True)
     schedule = serializer.save()
 
-    # Celery tasks
+    # ---- CELERY TASKS ----
     start_datetime = timezone.make_aware(
         datetime.combine(schedule.scheduled_date, schedule.scheduled_time)
     )
@@ -93,6 +98,7 @@ def create_schedule(request):
     set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
     set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
 
+    # ---- SUCCESS RESPONSE ----
     return Response(
         {
             "status": 201,
@@ -127,7 +133,7 @@ def create_schedule_immediately(request):
     scheduled_time = rounded_now.time()
 
     # ---- END TIME = +1 hour (rounded) ----
-    new_end_dt = rounded_now + timedelta(hours=1)
+    new_end_dt = rounded_now + timedelta(minutes=3)
     end_time = new_end_dt.replace(second=0, microsecond=0).time()
 
     # ---- OVERLAP CHECK ----
@@ -205,7 +211,8 @@ def update_schedule(request, schedule_id):
     new_scheduled_time = rounded_now.time()
 
     # 3️⃣ END TIME = +1 hour
-    new_end_dt = now + timedelta(hours=1)
+    # new_end_dt = now + timedelta(hours=1)
+    new_end_dt = now + timedelta(minutes=3)
     new_end_time = new_end_dt.time()
 
     # 4️⃣ OVERLAP CHECK
@@ -303,6 +310,11 @@ def delete_schedule(request, schedule_id):
     )
 
 
+@swagger_auto_schema(
+    method="post",
+    request_body=InspectionSerializer,
+    responses={201: "Schedule created"}
+)
 # -----------------------------------
 # CREATE INSPECTION (Simple)
 # -----------------------------------
@@ -351,36 +363,50 @@ def list_schedules(request):
 # -----------------------------------
 # CREATE INSPECTION WITH SCHEDULE ID
 # -----------------------------------
-class InspectionListCreateView(APIView):
+# class InspectionListCreateView(APIView):
 
+#     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+#     def post(self, request, schedule_id):
+
+#         data = request.data.copy()
+#         data["schedule"] = schedule_id  # attach FK
+
+#         serializer = InspectionSerializer(data=data)
+#         if serializer.is_valid():
+#             serializer.save()
+#             return Response(
+#                 {
+#                     "success": True,
+#                     "message": "Inspection created successfully",
+#                     "data": serializer.data
+#                 },
+#                 status=status.HTTP_201_CREATED
+#             )
+
+#         return Response(
+#             {
+#                 "success": False,
+#                 "message": "Validation failed",
+#                 "errors": serializer.errors
+#             },
+#             status=status.HTTP_400_BAD_REQUEST
+#         )
+
+
+
+
+
+class InspectionListCreateView(ListCreateAPIView):
+    serializer_class = InspectionSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def post(self, request, schedule_id):
+    def get_queryset(self):
+        return Inspection.objects.filter(schedule=self.kwargs["schedule_id"])
 
-        data = request.data.copy()
-        data["schedule"] = schedule_id  # attach FK
-
-        serializer = InspectionSerializer(data=data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(
-                {
-                    "success": True,
-                    "message": "Inspection created successfully",
-                    "data": serializer.data
-                },
-                status=status.HTTP_201_CREATED
-            )
-
-        return Response(
-            {
-                "success": False,
-                "message": "Validation failed",
-                "errors": serializer.errors
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
+    def perform_create(self, serializer):
+        schedule_id = self.kwargs["schedule_id"]
+        serializer.save(schedule_id=schedule_id)
 
 # -----------------------------------
 # CREATE INSPECTION (Standalone)
