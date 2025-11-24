@@ -39,7 +39,7 @@ class Inspection(models.Model):
     is_defect = models.BooleanField(default=False)
 
     inspected_at = models.DateTimeField(auto_now_add=True)
-
+    description = models.TextField(null=True, blank=True) 
     class Meta:
         unique_together = ("schedule", "rim_id")
 
