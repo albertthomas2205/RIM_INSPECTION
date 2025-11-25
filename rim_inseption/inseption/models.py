@@ -42,6 +42,5 @@ class Inspection(models.Model):
     description = models.TextField(null=True, blank=True) 
     class Meta:
         unique_together = ("schedule", "rim_id")
-
     def __str__(self):
         return f"Inspection {self.rim_id} -> Schedule {self.schedule.id}"
