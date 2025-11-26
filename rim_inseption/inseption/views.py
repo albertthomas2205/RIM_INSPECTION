@@ -397,6 +397,19 @@ def list_schedules(request):
 
 
 
+# class InspectionListCreateView(ListCreateAPIView):
+#     serializer_class = InspectionSerializer
+#     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+#     def get_queryset(self):
+#         return Inspection.objects.filter(schedule=self.kwargs["schedule_id"])
+
+#     def perform_create(self, serializer):
+#         schedule_id = self.kwargs["schedule_id"]
+#         serializer.save(schedule_id=schedule_id)
+
+
+
 class InspectionListCreateView(ListCreateAPIView):
     serializer_class = InspectionSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -407,6 +420,28 @@ class InspectionListCreateView(ListCreateAPIView):
     def perform_create(self, serializer):
         schedule_id = self.kwargs["schedule_id"]
         serializer.save(schedule_id=schedule_id)
+
+    # ✅ Custom success response
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+
+        return Response({
+            "success": True,
+            "message": "Inspection created successfully",
+            "inspection": response.data
+        }, status=status.HTTP_201_CREATED)
+
+    
+        # ---------- GET CUSTOM RESPONSE ----------
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+
+        return Response({
+            "success": True,
+            "message": "Inspections retrieved successfully",
+            "inspections": serializer.data
+        }, status=status.HTTP_200_OK)
 
 # -----------------------------------
 # CREATE INSPECTION (Standalone)
