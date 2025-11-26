@@ -473,3 +473,25 @@ class InspectionCreateView(APIView):
             status=status.HTTP_400_BAD_REQUEST
         )
 
+
+
+class StartSpeakView(APIView):
+    def get(self, request):
+        return Response({
+            "success": True,
+            "message": "Speak started successfully",
+            "data": {
+                "speak": True
+            }
+        })
+
+
+class StopSpeakView(APIView):
+    def get(self, request):
+        return Response({
+            "success": True,
+            "message": "Speak stopped successfully",
+            "data": {
+                "speak": False
+            }
+        })
