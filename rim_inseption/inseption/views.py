@@ -6,7 +6,7 @@ from rest_framework import status
 from django.utils import timezone
 from datetime import datetime, timedelta
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from .models import Schedule, Inspection
+from .models import Schedule, Inspection,SpeakConfig
 from .serializers import ScheduleSerializer, InspectionSerializer
 from .tasks import set_status_processing, set_status_completed
 from drf_yasg.utils import swagger_auto_schema
@@ -474,24 +474,32 @@ class InspectionCreateView(APIView):
         )
 
 
+speak_status = {"speak": False}
 
-class StartSpeakView(APIView):
+class SpeakStatusView(APIView):
     def get(self, request):
+        return Response({
+            "success": True,
+            "message": "Speak status fetched successfully",
+            "data": speak_status
+        })
+        
+        
+class StartSpeakView(APIView):
+    def post(self, request):
+        speak_status["speak"] = True
         return Response({
             "success": True,
             "message": "Speak started successfully",
-            "data": {
-                "speak": True
-            }
+            "data": speak_status
         })
 
-
+        
 class StopSpeakView(APIView):
-    def get(self, request):
+    def post(self, request):
+        speak_status["speak"] = False
         return Response({
             "success": True,
             "message": "Speak stopped successfully",
-            "data": {
-                "speak": False
-            }
+            "data": speak_status
         })
